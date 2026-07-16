@@ -1,0 +1,21 @@
+spectral_windows:
+
+  window1:
+    wavelength_unit: nm
+    wavelength_min: 4350.0
+    wavelength_max: 4500.0
+    wavelength_ref: 4500.0
+    wavelength_buffer: 2.0
+    SNR: 100
+
+gases:
+  - CO2
+  - H2O
+
+instrument:
+  spectral_sampling: 0.02
+  FWHM: 0.25
+  unit: nm
+
+viewing_zenith: 15.0
+viewing_azimuth: 0.0

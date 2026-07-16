@@ -1,0 +1,6 @@
+*.ipynb
+*.jld2
+.ipynb_checkpoints
+Manifest.toml
+*.h5
+RetrievalToolbox_HITRAN.sqlite
