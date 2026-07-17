@@ -19,3 +19,8 @@ instrument:
 
 viewing_zenith: 15.0
 viewing_azimuth: 0.0
+
+longitude: -93.3
+latitude: 45.0
+elevation: 80.0m
+surface_pressure: 985.0hPa

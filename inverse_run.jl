@@ -69,7 +69,7 @@ function main()
     )
 
     # Surface pressure
-    surface_pressure = 1000.0u"hPa"
+    surface_pressure = uparse(yml["surface_pressure"])
 
     # Figure out how many spectral samples our instrument will have
     instrument_wavelength_start = 4000.0u"nm"
@@ -376,6 +376,21 @@ function main()
         Float64 # The chosen Float data type (e.g. Float16, Float32, Float64)
     )
 
+    # Add location details. We must create a new EarthLocation object, and then
+    # insert it into the EarthScene object.
+
+    # .. unit-aware handling of elevation
+    elevation = uparse(yml["elevation"])
+
+    new_location = RE.EarthLocation(
+        yml["longitude"],
+        yml["latitude"],
+        ustrip(elevation),
+        unit(elevation)
+    )
+
+    buffer.scene.location = new_location
+
     # Set the instrument viewing angles
     buffer.scene.observer.viewing_zenith = yml["viewing_zenith"]
     buffer.scene.observer.viewing_azimuth = yml["viewing_azimuth"]
@@ -384,6 +399,8 @@ function main()
     @info "$(buffer.scene.observer)"    
 
     # Set the surface reflectance to some value
+    # (note this will be overwritten anyway in the forward model if a
+    #  state vector element is modifying these values..)
     for (swin, surface) in buffer.scene.surfaces
         surface.kernels[1].coefficients[1] = 0.25 # value at reference wavelength
         surface.kernels[1].coefficients[2] = 0.0 # slope per wavelength
