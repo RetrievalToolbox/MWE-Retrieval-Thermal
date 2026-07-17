@@ -10,6 +10,14 @@ The observer is set as a space-based observer looking down at some user-specifie
 
 Error checking and input sanitization is kept to a minimum to allow users to look at the most necessary architecture of a RetrievalToolbox retrieval set-up.
 
+The forward and inverse scripts feature a lot of duplicate code since some tasks are mostly the same for both. We keep them duplicated, however, such that users may more easily adjust either forward or inverse program. Users may want to experiment for learning purposes:
+
+- Provide more inputs via the YAML configuration to drive the programs
+- Allow for forward simulation / retrieval mismatches via the configuration
+- Add more outputs to the result HDF5 files
+- ...
+
+Consult the RetrievalToolbox documentation for more details.
 
 ## Requirements and Installation
 
