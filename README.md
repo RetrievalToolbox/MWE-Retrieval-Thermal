@@ -4,7 +4,7 @@ This example application is a fully self-contained demo that illustrates how a r
 
 ## Introduction
 
-This code example serves as a bare-bones implementation of a trace gas retrieval for CO$_2$ and H$_2$O in thermal wavelength region between 4 µm and 5 µm. It contains two seperate scripts: one that runs the forward model in "forward mode", to produce synthetic observations; and a second script that runs a retrieval on those to adjust a small number of parameters and finds the best fit to the generated synthetic observations.
+This code example serves as a bare-bones implementation of a trace gas retrieval for CO$`_2`$ and H$`_2`$O in thermal wavelength region between 4 µm and 5 µm. It contains two seperate scripts: one that runs the forward model in "forward mode", to produce synthetic observations; and a second script that runs a retrieval on those to adjust a small number of parameters and finds the best fit to the generated synthetic observations.
 
 The observer is set as a space-based observer looking down at some user-specified viewing angle. Due to the wavelength ranges considered here, there is no solar model needed (emission spectroscopy) and thus also no solar geometry. No atmospheric scattering due to aerosols is considered either.
 
@@ -77,7 +77,7 @@ After synthetic observations are created, we can run the inverse script, which a
 
 If no edits are made to the files, the retrieval will do very little, as the true values of the forward run are used as the initial values, and thus the fit will converge after two forward model evaluations. The program will print out some details about the posterior state vector and then quit. The radiance fits are stored out into the `fit_results.h5` file (or whichever filename the user supplied via the `-o` argument).
 
-The un-modified script should re-produce the following. The atmospheric temperature offset should be ~0 K, the surface temperature 300 K. Both gas scaling factors for CO$_2$ and H$_2$O should be ~1.0, and the surface albedo coefficients 0.25 and 0.001.
+The un-modified script should re-produce the following. The atmospheric temperature offset should be ~0 K, the surface temperature 300 K. Both gas scaling factors for CO$`_2`$ and H$`_2`$O should be ~1.0, and the surface albedo coefficients 0.25 and 0.001.
 
 Should users change the contents of the driving YAML configuration, both forward and inverse must be run for changes to take effect, unless a mis-matched situation is desired. If the spectral windows themselves are changed (extent, number, ..), the spectroscopy creation may also need to be re-run.
 
