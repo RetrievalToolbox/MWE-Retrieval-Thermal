@@ -73,15 +73,15 @@ Change the command line argument `-i` if you want to use a different window file
 
 Once the spectroscopy is created, we must run the forward script which generates the synthetic observations:
 
-    julia --project=. forward_run.jl -i example_windows.yml -o synth_obs.h5
+    XRTM_PATH=/path/to/XRTM julia --project=. forward_run.jl -i example_windows.yml -o synth_obs.h5
 
-The `-o` commandline argument defines the location of the newly created file which contains the radiances of the synthetic observation.
+The `-o` commandline argument defines the location of the newly created file which contains the radiances of the synthetic observation. Note you **must** have the correct XRTM path set to point at the main root folder of your XRTM build. The program will not execute correctly without a working XRTM build.
 
 ## Running the retrieval
 
 After synthetic observations are created, we can run the inverse script, which adjusts a small number of parameters to fit the (synthetic) observations:
 
-    julia --project=. inverse_run.jl -i example_windows.yml -m synth_obs.h5 -o fit_results.h5
+    XRTM_PATH=/path/to/XRTM julia --project=. inverse_run.jl -i example_windows.yml -m synth_obs.h5 -o fit_results.h5
 
 If no edits are made to the files, the retrieval will do very little, as the true values of the forward run are used as the initial values, and thus the fit will converge after two forward model evaluations. The program will print out some details about the posterior state vector and then quit. The radiance fits are stored out into the `fit_results.h5` file (or whichever filename the user supplied via the `-o` argument).
 
