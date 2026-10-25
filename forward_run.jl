@@ -397,17 +397,26 @@ function main()
             
             g = create_group(fid, swin.window_name)
             
-            output_radiance = zeros(length(disp.index))
-            output_radiance[:] .= rt_buffer.radiance.I[rt_buffer.indices[swin]]
+            # Write radiance
+            output_radiance = zeros(length(disp.detector_samples)) * NaN
+            output_radiance[disp.index] .= rt_buffer.radiance.I[rt_buffer.indices[swin]]
             
             dset = create_dataset(g, "radiance", Float64, (length(output_radiance),))
             write(dset, output_radiance)
 
-            dset = create_dataset(g, "noise", Float64, (length(output_radiance),))
-            write(dset, noise_dict[swin])
+            # Write noise
+            output_noise = zeros(length(disp.detector_samples)) * NaN
+            output_noise[disp.index] .= noise_dict[swin]
 
-            dset = create_dataset(g, "wavelength", Float64, (length(disp.ww),))
-            write(dset, disp.ww)
+            dset = create_dataset(g, "noise", Float64, (length(output_noise),))
+            write(dset, output_noise)
+
+            # Write spectral
+            output_ww = zeros(length(disp.detector_samples)) * NaN
+            output_ww[disp.index] .= disp.ww
+
+            dset = create_dataset(g, "wavelength", Float64, (length(output_ww),))
+            write(dset, output_ww)
 
         end
 
