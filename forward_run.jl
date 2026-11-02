@@ -366,12 +366,19 @@ function main()
     noise_dict = Dict{RE.SpectralWindow, Vector{Float64}}()
 
     for swin in spectral_window_list
-        snr = yml["spectral_windows"][swin.window_name]["SNR"]
+
+        # Our noise model is:
+        #   noise = √(a*I + b)
+
+        noise_a = yml["spectral_windows"][swin.window_name]["noise_a"]
+        noise_b = yml["spectral_windows"][swin.window_name]["noise_b"]
 
         # This is a simple SNR model, where noise is a normal distribution
         # sample with sigma = signal / SNR. You may want to replace this
         # by an actual noise model.
-        noise = rt_buffer.radiance.I[rt_buffer.indices[swin]] ./ snr
+        signal = rt_buffer.radiance.I[rt_buffer.indices[swin]]
+
+        noise = @. sqrt(signal * noise_a + noise_b)
         noise .*= randn(rng, Float64, (length(noise)))
 
         # Add noise to radiance
