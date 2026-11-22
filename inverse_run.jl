@@ -60,8 +60,7 @@ function main()
     =#
 
     # Number of pressure levels for the radiative transfer
-    # (USER CHOICE: choose any value that cleanly divides 72: 72, 36, 18 or 9
-    N_RT_lev = 9
+    N_RT_lev = 12
 
     # Gas VMR unit lookup
     vmr_unit_lookup = Dict(
@@ -77,8 +76,6 @@ function main()
     instrument_wavelength_end = 5000.0u"nm"
     dλ = yml["instrument"]["spectral_sampling"] * uparse(yml["instrument"]["unit"])
     Nsamples = round((instrument_wavelength_end - instrument_wavelength_start) / dλ) |> Int
-
-
 
 
     #=
@@ -204,23 +201,12 @@ function main()
     # For simplicity, we chose the lowest pressure level of our retrieval grid
     # to be the same as our lowest-level MET pressure from the example atmosphere.
     
-    
-    
-    """
     RE.ingest!(
         atmosphere, :pressure_levels,
         create_UoL_pressure_grid(
             ex_atm.met_pressure[end] * ex_atm.met_pressure_unit, 80.0u"Pa";
             N_total=N_RT_lev)
     )
-    """
-    
-    skip_met = ex_atm.N_met_level // N_RT_lev |> Int
-    RE.ingest!(
-        atmosphere, :pressure_levels,
-        ex_atm.met_pressure[1:skip_met:end] * ex_atm.met_pressure_unit
-    )
-    
 
     # .. and copy to Met grid. Now both grids are the same, which
     # is needed for T profile retrieval.
@@ -267,31 +253,29 @@ function main()
 
     # We take the H2O VMR from the atmosphere's specific humidity
     # (1) sample specific humidity profile at retrieval pressure levels
-    """
+    
     sh_profile = RE.atmospheric_profile_interpolator_linear(
         atmosphere.met_pressure,
         atmosphere.specific_humidity,
         atmosphere.pressure_levels
     )
-    """
 
     # (2) convert specific humidity to H2O volume mixing ratio
-    h2o_profile = RE.specific_humidity_to_H2O_VMR.(atmosphere.specific_humidity)
+    h2o_profile = RE.specific_humidity_to_H2O_VMR.(sh_profile)
     # (3) insert into gas object
     gas_dict["H2O"].vmr_levels[:] .= h2o_profile
 
     # Set CO2 profile to some value
     # NOTE! YOU MAY WANT TO SET THIS TO A DIFFERENT VALUE COMPARED TO THE FORWARD RUN
-    # gas_dict["CO2"].vmr_levels[:] .= 405.0 # remember, this is in ppm
+    gas_dict["CO2"].vmr_levels[:] .= 405.0 # remember, this is in ppm
 
     @info "Adding thermal emission of atmosphere"
     push!(atmosphere.atm_elements, RE.ThermalAtmosphereIsotropic())
 
     # NOTE! YOU MAY WANT TO SET THIS TO A DIFFERENT VALUE COMPARED TO THE FORWARD RUN
     @info "Adding thermal emission of surface"
-    push!(atmosphere.atm_elements, RE.ThermalSurfaceIsotropic(300.0, u"K"))
+    push!(atmosphere.atm_elements, RE.ThermalSurfaceIsotropic(280.0, u"K"))
     
-
     #=
         Setting up the state vector
         ===========================
@@ -307,14 +291,13 @@ function main()
 
     # Adjusts the temperature profile by adding a constant offset.
     # (removed here, since we retrieve the profile)
-    #=
+    
     T_offset_SVE = RE.TemperatureOffsetSVE(
         u"K", # unit
         0.0, # first guess
         0.0, # prior value
         10.0, # prior covariance
     )
-    =#
 
     T_profile_SVE = RE.TemperatureProfileSVE(
         atmosphere,
@@ -332,8 +315,8 @@ function main()
 
     surfaceT_SVE = RE.SurfaceTemperatureSVE(
         u"K",
-        280.0, # first guess
-        280.0, # prior value
+        295.0, # first guess
+        295.0, # prior value
         10.0, # prior covariance
     )
 
@@ -343,7 +326,6 @@ function main()
     for gas_name in yml["gases"]
 
         if gas_name == "CO2"
-            # We
             continue
         end
 
@@ -386,9 +368,9 @@ function main()
             # Set the first guess according to coefficient order
             # NOTE! YOU MAY WANT TO SET THIS TO A DIFFERENT VALUE COMPARED TO THE FORWARD RUN
             if order == 0
-                fg = 0.25
+                fg = 0.20
             else
-                fg = 0.0001
+                fg = 0.00
             end
 
             this_surf_SVE = RE.BRDFPolynomialSVE(
@@ -398,7 +380,7 @@ function main()
                 u"nm",
                 fg, # first guess
                 fg, # prior = first guess here
-                1.0^(-2*order)
+                1.0,
             )
 
             push!(surf_SVEs, this_surf_SVE)
@@ -406,7 +388,6 @@ function main()
         end
 
     end    
-
 
 
     # Collect all SVEs and construct the state vector
@@ -417,8 +398,6 @@ function main()
         co2_profile_SVE..., # Unpack all CO2 level SVEs
         surf_SVEs..., # Must unpack the list of SVE elemets
     ])
-
-
 
 
     @info "Create buffer objects"
@@ -548,7 +527,6 @@ function main()
         ISRF_dict=ISRF_dict,
     )
 
-
     # Create solver, this object managers the linear algebra and
     # is needed to find a solution.
     #
@@ -559,7 +537,7 @@ function main()
         RE.get_prior_covariance(state_vector) |> Diagonal |> Matrix,
         100.0, # LM-gamma
         20, # max number of iterations
-        5.0, # dsigma scale
+        1.0, # dsigma scale
         dispersion_dict,
         rt_buffer.indices,
         rt_buffer.radiance,
@@ -572,29 +550,29 @@ function main()
     # profile retrieval. If we leave the T profile SVEs uncorrelated,
     # the inversion algorithm will produce quite unphysical results.
 
+    # We use a generic covariance idea here, simply to regularize the 
+    # retrieval, otherwise the CO2 and T profiles would oscillate
+    # and have a harder time converging.
     
     # Shorthand
     Sa = solver.prior_covariance
 
     # Set T covariance
     idx_Tprofile = idx_for_Tprofile_sve(state_vector)
-    for idx1 in idx_Tprofile
-        for idx2 in idx_Tprofile
-            if idx1 != idx2
-                Sa[idx1, idx2] = abs(idx1 - idx2) < 3 ? sqrt(Sa[idx1, idx1] * Sa[idx2, idx2]) * 0.25 / abs(idx1 - idx2) : 0.0
-            end
-        end
+    for idx1 in idx_Tprofile, idx2 in idx_Tprofile
+        idx1 == idx2 && continue # Skip diagonal elements
+        
+        Sa[idx1, idx2] = abs(idx1 - idx2) < 6 ? sqrt(Sa[idx1, idx1] * Sa[idx2, idx2]) * 0.25 / abs(idx1 - idx2) : 0.0
     end
 
     # Set CO2 covariance
     idx_CO2profile = idx_for_profile_sve(gas_co2, state_vector)
-    for idx1 in idx_CO2profile
-        for idx2 in idx_CO2profile
-            if idx1 != idx2
-                Sa[idx1, idx2] = abs(idx1 - idx2) < 3 ? sqrt(Sa[idx1, idx1] * Sa[idx2, idx2]) * 0.25 / abs(idx1 - idx2) : 0.0
-            end
-        end
+    for idx1 in idx_CO2profile, idx2 in idx_CO2profile
+        idx1 == idx2 && continue
+         
+        Sa[idx1, idx2] = abs(idx1 - idx2) < 7 ? sqrt(Sa[idx1, idx1] * Sa[idx2, idx2]) * 0.25 / abs(idx1 - idx2) : 0.0
     end
+
 
     iter_result = true
     converged = false
@@ -619,7 +597,7 @@ function main()
         end
 
         chi2_all = RE.calculate_chi2(solver)
-        @info "Fit quality:"
+        @info "Fit quality at iteration $(RE.get_iteration_count(solver)):"
         for (swin, chi2) in chi2_all
             @info "$(swin): $(chi2)"
         end 
@@ -647,6 +625,8 @@ function main()
 
     # Print out the posterior
     RE.print_posterior(solver)
+
+    @info RE.calculate_xgas(buffer.scene.atmosphere)
 
 
     # Store the radiances as output
@@ -677,16 +657,22 @@ function main()
 
     end
 
-    @info "Correlation matrix"
+    # Can calculate correlation matrix if needed..
+    #=
     q = RE.calculate_OE_quantities(solver)
 
     C = zeros(size(q.Shat)...)
 
     for i in 1:size(q.Shat, 1)
         for j in 1:size(q.Shat, 2)
-            C[i,j] = q.Shat[i,j] / sqrt(q.Shat[i,i] * q.Shat[j,j])
+            if i == j
+                C[i,j] = NaN
+            else
+                C[i,j] = q.Shat[i,j] / sqrt(q.Shat[i,i] * q.Shat[j,j])
+            end
         end
     end
+    =#
 
 end
 
