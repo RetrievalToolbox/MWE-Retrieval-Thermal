@@ -60,7 +60,7 @@ function main()
     =#
 
     # Number of pressure levels for the radiative transfer
-    N_RT_lev = 72
+    N_RT_lev = 12
 
     # Gas VMR unit lookup
     vmr_unit_lookup = Dict(
@@ -76,8 +76,6 @@ function main()
     instrument_wavelength_end = 5000.0u"nm"
     dλ = yml["instrument"]["spectral_sampling"] * uparse(yml["instrument"]["unit"])
     Nsamples = round((instrument_wavelength_end - instrument_wavelength_start) / dλ) |> Int
-
-
 
 
     #=
@@ -177,34 +175,64 @@ function main()
     =#
     @info "Creating and setting atmosphere"
 
-    # Create an Earth atmosphere object, in this case a US midwest summer one
-    atmosphere = RE.create_example_atmosphere("US-midwest-summer", N_RT_lev);   
+    # Note: we create the atmosphere object with same amount of 
+    # meteorological levels as RT levels, in order to make a T
+    # profile retrieval possible.
+
+    # Create an empty Earth atmosphere object
+    atmosphere = create_empty_EarthAtmosphere(
+        N_RT_lev, # Number of retrieval pressure levels
+        N_RT_lev, # Number of met pressure levels
+        Float64; # Number type
+        pressure_unit=u"hPa", # Retrieval grid pressure unit
+        met_pressure_unit=u"hPa", # Met grid pressure unit
+        temperature_unit=u"K", # Temperature unit
+        specific_humidity_unit=u"kg/kg", # Specific humidity unit
+        altitude_unit=u"m", # Altitude unit
+        gravity_unit=u"m/s^2" # Gravity unit
+    )
+
+    # Grab an example from the library for reasonable T and q profiles
+    # (will be used a little later)
+    ex_atm = RE.create_example_atmosphere("US-midwest-summer", N_RT_lev)
 
     # Set the retrieval / RT grid
     # (unit conversion done automatically)
-    #RE.ingest!(
-    #    atmosphere, :pressure_levels,
-    #    create_UoL_pressure_grid(1000.0u"hPa", 80.0u"Pa"; N_total=N_RT_lev)
-    #)
-
+    # For simplicity, we chose the lowest pressure level of our retrieval grid
+    # to be the same as our lowest-level MET pressure from the example atmosphere.
+    
     RE.ingest!(
         atmosphere, :pressure_levels,
-        atmosphere.met_pressure * atmosphere.met_pressure_unit
+        create_UoL_pressure_grid(
+            ex_atm.met_pressure[end] * ex_atm.met_pressure_unit, 80.0u"Pa";
+            N_total=N_RT_lev)
+    )
+
+    # .. and copy to Met grid. Now both grids are the same, which
+    # is needed for T profile retrieval.
+    atmosphere.met_pressure[:] .= atmosphere.pressure_levels[:]
+    
+
+    # Interpolate onto our grid!
+    atmosphere.specific_humidity[:] .= RE.atmospheric_profile_interpolator_linear(
+        ex_atm.met_pressure * ex_atm.met_pressure_unit, # input grid
+        ex_atm.specific_humidity, # input profile 
+        atmosphere.met_pressure * atmosphere.met_pressure_unit # output grid
+    )
+
+    atmosphere.temperature[:] .= RE.atmospheric_profile_interpolator_linear(
+        ex_atm.met_pressure * ex_atm.met_pressure_unit, # input grid
+        ex_atm.temperature, # input profile
+        atmosphere.met_pressure * atmosphere.met_pressure_unit # output grid
     )
 
     # Collect and create required gases
+    # (we take the gas profiles from our example library, and
+    #  interpolate onto the atmosphere grid that is already present)
     for gas_name in yml["gases"]
 
         @info "Creating gas $(gas_name)"
         
-        #=
-        gas = RE.GasAbsorber(
-            gas_name,
-            ABSCO_dict[gas_name],
-            zeros(N_RT_lev),
-            vmr_unit_lookup[gas_name]
-        )
-        =#
         gas = create_example_gas_profile(
             "US-midwest-summer",
             gas_name,
@@ -217,14 +245,15 @@ function main()
     end
 
 
-
     for (gas_name, gas) in gas_dict
         @info "Adding $(gas) to atmosphere"
         push!(atmosphere.atm_elements, gas)
     end
 
+
     # We take the H2O VMR from the atmosphere's specific humidity
     # (1) sample specific humidity profile at retrieval pressure levels
+    
     sh_profile = RE.atmospheric_profile_interpolator_linear(
         atmosphere.met_pressure,
         atmosphere.specific_humidity,
@@ -238,18 +267,16 @@ function main()
 
     # Set CO2 profile to some value
     # NOTE! YOU MAY WANT TO SET THIS TO A DIFFERENT VALUE COMPARED TO THE FORWARD RUN
-    # gas_dict["CO2"].vmr_levels[:] .= 405.0 # remember, this is in ppm
+    gas_dict["CO2"].vmr_levels[:] .= 405.0 # remember, this is in ppm
 
     @info "Adding thermal emission of atmosphere"
     push!(atmosphere.atm_elements, RE.ThermalAtmosphereIsotropic())
 
     # NOTE! YOU MAY WANT TO SET THIS TO A DIFFERENT VALUE COMPARED TO THE FORWARD RUN
     @info "Adding thermal emission of surface"
-    push!(atmosphere.atm_elements, RE.ThermalSurfaceIsotropic(300.0, u"K"))
+    push!(atmosphere.atm_elements, RE.ThermalSurfaceIsotropic(280.0, u"K"))
     
-
     #=
-
         Setting up the state vector
         ===========================
 
@@ -262,26 +289,45 @@ function main()
     =#
 
 
-    # Adjusts the temperature profile by adding a constant offset. We
-    # thus retrieve the 
-    DeltaT_profile_SVE = RE.TemperatureOffsetSVE(
+    # Adjusts the temperature profile by adding a constant offset.
+    # (removed here, since we retrieve the profile)
+    
+    T_offset_SVE = RE.TemperatureOffsetSVE(
         u"K", # unit
         0.0, # first guess
         0.0, # prior value
         10.0, # prior covariance
     )
 
+    T_profile_SVE = RE.TemperatureProfileSVE(
+        atmosphere,
+        u"K",
+    )
+
+    # Set the covariance for temperature profile SVEs
+    for (i, sve) in enumerate(T_profile_SVE)
+        
+        sve.prior_covariance = (25.0)^2 # in K
+        sve.first_guess = atmosphere.temperature[i]
+        sve.iterations[end] = sve.first_guess
+
+    end
+
     surfaceT_SVE = RE.SurfaceTemperatureSVE(
         u"K",
-        300.0, # first guess
-        300.0, # prior value
+        295.0, # first guess
+        295.0, # prior value
         10.0, # prior covariance
     )
 
-
     # Gas SVEs for every present gas:
     gas_SVEs = Vector{RE.GasLevelScalingFactorSVE}()
+    
     for gas_name in yml["gases"]
+
+        if gas_name == "CO2"
+            continue
+        end
 
         this_gas = RE.get_gas_from_name(atmosphere, gas_name)
 
@@ -299,6 +345,20 @@ function main()
 
     end
 
+    # Set CO2 profile SVEs
+
+    gas_co2 = RE.get_gas_from_name(atmosphere, "CO2")
+    co2_profile_SVE = RE.GasVMRProfileSVE(
+        gas_co2,
+        u"ppm"
+    )
+
+    for sve in co2_profile_SVE
+        sve.prior_covariance = (25.0)^2
+        sve.first_guess = gas_co2.vmr_levels[sve.level]
+        sve.iterations[1] = sve.first_guess
+    end
+
     # Retrieve the surface reflectance..
     surf_SVEs = Vector{RE.BRDFPolynomialSVE}()
     for swin in spectral_window_list
@@ -308,9 +368,9 @@ function main()
             # Set the first guess according to coefficient order
             # NOTE! YOU MAY WANT TO SET THIS TO A DIFFERENT VALUE COMPARED TO THE FORWARD RUN
             if order == 0
-                fg = 0.25
+                fg = 0.20
             else
-                fg = 0.0001
+                fg = 0.00
             end
 
             this_surf_SVE = RE.BRDFPolynomialSVE(
@@ -320,7 +380,7 @@ function main()
                 u"nm",
                 fg, # first guess
                 fg, # prior = first guess here
-                1.0^(-2*order)
+                1.0,
             )
 
             push!(surf_SVEs, this_surf_SVE)
@@ -330,15 +390,14 @@ function main()
     end    
 
 
-
     # Collect all SVEs and construct the state vector
     state_vector = RE.RetrievalStateVector([
-        DeltaT_profile_SVE,
+        T_profile_SVE..., # Must unpack the list of SVE elemets
         surfaceT_SVE,
-        gas_SVEs..., # unpack this list and add..
-        surf_SVEs..., # unpack this list and add..
+        gas_SVEs..., # Must unpack the list of SVE elemets
+        co2_profile_SVE..., # Unpack all CO2 level SVEs
+        surf_SVEs..., # Must unpack the list of SVE elemets
     ])
-
 
 
     @info "Create buffer objects"
@@ -406,6 +465,13 @@ function main()
         surface.kernels[1].coefficients[2] = 0.0 # slope per wavelength
     end
 
+
+    RE.calculate_altitude_and_gravity!(buffer.scene)
+    # Print the atmosphere, to double check things
+    #RE.print_atmosphere(buffer.scene.atmosphere)
+    #RE.print_atmosphere(ex_atm)
+
+
     rt_options = Dict()
     rt_options["solvers"] = ["eig_bvp"]
     rt_options["streams"] = 2
@@ -436,10 +502,19 @@ function main()
 
         for (swin, disp) in dispersion_dict
             meas_dict[disp] = zeros(length(disp.detector_samples))
-            meas_dict[disp][disp.index] = fid["$(swin.window_name)/radiance"][:]
+            meas_dict[disp][:] = fid["$(swin.window_name)/radiance"][:]
+
+            # Note - noise must be the standard deviation of the noise-equivalent-radiance,
+            # whereas we store the actual (synthetic) noise values in the synth obs file.
+            # We re-create it from the SNR value in the window file!
+            # noise ~ signal / SNR
 
             noise_dict[disp] = zeros(length(disp.detector_samples))
-            noise_dict[disp][disp.index] = fid["$(swin.window_name)/noise"][:]
+
+            noise_a = yml["spectral_windows"][swin.window_name]["noise_a"]
+            noise_b = yml["spectral_windows"][swin.window_name]["noise_b"]
+            @. noise_dict[disp][:] = sqrt(meas_dict[disp][:] * noise_a + noise_b)
+
         end
 
     end
@@ -452,16 +527,17 @@ function main()
         ISRF_dict=ISRF_dict,
     )
 
-
     # Create solver, this object managers the linear algebra and
     # is needed to find a solution.
-    @info "Creating IMAP solver object"
-    solver = RE.IMAPSolver(
+    #
+    @info "Creating Levenberg-Marquardt solver object"
+    solver = RE.LMSolver(
         forward_model!,
         state_vector,
-        Diagonal(RE.get_prior_covariance(state_vector)), # Prior covariance matrix - just use diagonal
+        RE.get_prior_covariance(state_vector) |> Diagonal |> Matrix,
+        100.0, # LM-gamma
         20, # max number of iterations
-        1, # dsigma scale
+        1.0, # dsigma scale
         dispersion_dict,
         rt_buffer.indices,
         rt_buffer.radiance,
@@ -470,13 +546,46 @@ function main()
         noise_dict # noise (full spectrometer)
     )
 
+    # Here we must further manipulate the prior covariance of the T
+    # profile retrieval. If we leave the T profile SVEs uncorrelated,
+    # the inversion algorithm will produce quite unphysical results.
+
+    # We use a generic covariance idea here, simply to regularize the 
+    # retrieval, otherwise the CO2 and T profiles would oscillate
+    # and have a harder time converging.
+    
+    # Shorthand
+    Sa = solver.prior_covariance
+
+    # Set T covariance
+    idx_Tprofile = idx_for_Tprofile_sve(state_vector)
+    for idx1 in idx_Tprofile, idx2 in idx_Tprofile
+        idx1 == idx2 && continue # Skip diagonal elements
+        
+        Sa[idx1, idx2] = abs(idx1 - idx2) < 6 ? sqrt(Sa[idx1, idx1] * Sa[idx2, idx2]) * 0.25 / abs(idx1 - idx2) : 0.0
+    end
+
+    # Set CO2 covariance
+    idx_CO2profile = idx_for_profile_sve(gas_co2, state_vector)
+    for idx1 in idx_CO2profile, idx2 in idx_CO2profile
+        idx1 == idx2 && continue
+         
+        Sa[idx1, idx2] = abs(idx1 - idx2) < 7 ? sqrt(Sa[idx1, idx1] * Sa[idx2, idx2]) * 0.25 / abs(idx1 - idx2) : 0.0
+    end
+
+
     iter_result = true
     converged = false
 
     # ITERATE!
     while !(RE.check_convergence(solver)) # Loop until converged
 
+        if RE.get_iteration_count(solver) >= solver.max_iterations
+            break
+        end
+
         @info "Doing iteration.."
+
         # Evaluate and produce next iteration state vector!
         iter_result = RE.next_iteration!(solver; fm_kwargs)
         
@@ -486,6 +595,12 @@ function main()
             @error "Error in the forward model evaluation! Exiting."
             exit()
         end
+
+        chi2_all = RE.calculate_chi2(solver)
+        @info "Fit quality at iteration $(RE.get_iteration_count(solver)):"
+        for (swin, chi2) in chi2_all
+            @info "$(swin): $(chi2)"
+        end 
 
     end
 
@@ -503,13 +618,15 @@ function main()
 
     # Print out the fit quality
     chi2_all = RE.calculate_chi2(solver)
-    @info "Fit quality:"
+    @info "Final fit quality:"
     for (swin, chi2) in chi2_all
         @info "$(swin): $(chi2)"
     end 
 
     # Print out the posterior
     RE.print_posterior(solver)
+
+    @info RE.calculate_xgas(buffer.scene.atmosphere)
 
 
     # Store the radiances as output
@@ -539,6 +656,23 @@ function main()
         end
 
     end
+
+    # Can calculate correlation matrix if needed..
+    #=
+    q = RE.calculate_OE_quantities(solver)
+
+    C = zeros(size(q.Shat)...)
+
+    for i in 1:size(q.Shat, 1)
+        for j in 1:size(q.Shat, 2)
+            if i == j
+                C[i,j] = NaN
+            else
+                C[i,j] = q.Shat[i,j] / sqrt(q.Shat[i,i] * q.Shat[j,j])
+            end
+        end
+    end
+    =#
 
 end
 
