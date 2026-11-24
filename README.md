@@ -4,9 +4,11 @@ This example application is a fully self-contained demo that illustrates how a r
 
 ## Introduction
 
-This code example serves as a bare-bones implementation of a trace gas retrieval for CO$`_2`$ and H$`_2`$O in thermal wavelength region between 4 µm and 5 µm. It contains two seperate scripts: one that runs the forward model in "forward mode", to produce synthetic observations; and a second script that runs a retrieval on those to adjust a small number of parameters and finds the best fit to the generated synthetic observations.
+This code example serves as a bare-bones implementation of a trace gas retrieval for CO$`_2`$ and H$`_2`$O in thermal wavelength region between 4 µm and 5 µm. It contains two seperate scripts: one that runs the forward model in "forward mode", to produce synthetic observations; and a second script that runs a retrieval on those to adjust a small number of parameters and finds the best fit to the generated synthetic observations. The scripts are **deliberately** kept inside big functions mainly to allow for users to quickly identify the relevant code sections.
 
 The observer is set as a space-based observer looking down at some user-specified viewing angle. Due to the wavelength ranges considered here, there is no solar model needed (emission spectroscopy) and thus also no solar geometry. No atmospheric scattering due to aerosols is considered either.
+
+The retrieval is (currently) set up to retrieve a CO$`_2`$ profile, a temperature profile, an H$`_2`$O scale factor as well as the surface temperature. Those parameters can be easily modified inside the `inverse_run.jl` script. Notably, users may want to experiment with disabling (commenting out) the temperature profile or the CO$`_2`$ profile retrieval, to see the impact on the uncertainties or degrees of freedom.
 
 Error checking and input sanitization is kept to a minimum to allow users to look at the most necessary architecture of a RetrievalToolbox retrieval set-up.
 
@@ -41,7 +43,8 @@ For a first attempt, we recommend not changing the windows file at all, but the 
             wavelength_max: 4500.0
             wavelength_ref: 4500.0
             wavelength_buffer: 2.0
-            SNR: 100
+            snr_a: 2500
+            snr_b: 2500
 
         window2:
             ...
