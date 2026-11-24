@@ -506,14 +506,23 @@ function main()
 
             # Note - noise must be the standard deviation of the noise-equivalent-radiance,
             # whereas we store the actual (synthetic) noise values in the synth obs file.
-            # We re-create it from the SNR value in the window file!
+
+            # We re-create it from the SNR coefficients in the window file!
+            
+            # SNR model is now 
+            # SNR = √(a*I + b)
             # noise ~ signal / SNR
 
             noise_dict[disp] = zeros(length(disp.detector_samples))
 
-            noise_a = yml["spectral_windows"][swin.window_name]["noise_a"]
-            noise_b = yml["spectral_windows"][swin.window_name]["noise_b"]
-            @. noise_dict[disp][:] = sqrt(meas_dict[disp][:] * noise_a + noise_b)
+            snr_a = yml["spectral_windows"][swin.window_name]["snr_a"]
+            snr_b = yml["spectral_windows"][swin.window_name]["snr_b"]
+
+            # Apply SNR model
+            snr = @. sqrt(abs(meas_dict[disp][:] * snr_a + snr_b))
+            # Get the noise-equivalent radiace!
+            # (these will be turned into noise-covariances internally)
+            @. noise_dict[disp][:] = meas_dict[disp][:] / snr
 
         end
 
@@ -570,7 +579,7 @@ function main()
     for idx1 in idx_CO2profile, idx2 in idx_CO2profile
         idx1 == idx2 && continue
          
-        Sa[idx1, idx2] = abs(idx1 - idx2) < 7 ? sqrt(Sa[idx1, idx1] * Sa[idx2, idx2]) * 0.25 / abs(idx1 - idx2) : 0.0
+        Sa[idx1, idx2] = abs(idx1 - idx2) < 4 ? sqrt(Sa[idx1, idx1] * Sa[idx2, idx2]) * 0.25 / abs(idx1 - idx2) : 0.0
     end
 
 
@@ -657,22 +666,20 @@ function main()
 
     end
 
-    # Can calculate correlation matrix if needed..
-    #=
+    # Do some analysis of the retrieval results    
     q = RE.calculate_OE_quantities(solver)
 
-    C = zeros(size(q.Shat)...)
+    # Look at DOFs of gases, which is the sum of diagonal elements of the AK matrix
+    # for the relevant state vector elements:
+    DOF_CO2 = [q.AK[i,i] for i in idx_CO2profile] |> sum
+    @info "Degrees of freedom for CO2: $(DOF_CO2)"
 
-    for i in 1:size(q.Shat, 1)
-        for j in 1:size(q.Shat, 2)
-            if i == j
-                C[i,j] = NaN
-            else
-                C[i,j] = q.Shat[i,j] / sqrt(q.Shat[i,i] * q.Shat[j,j])
-            end
-        end
+    # Correlation matrix
+    C = zeros(size(q.Shat)...)
+    for i in 1:size(q.Shat, 1), j in 1:size(q.Shat, 2)
+        i == j ? C[i,j] = NaN : C[i,j] = q.Shat[i,j] / sqrt(q.Shat[i,i] * q.Shat[j,j])
     end
-    =#
+    
 
 end
 

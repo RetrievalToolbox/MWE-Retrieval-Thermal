@@ -368,17 +368,18 @@ function main()
     for swin in spectral_window_list
 
         # Our noise model is:
-        #   noise = √(a*I + b)
+        #   SNR = √(a*I + b)
 
-        noise_a = yml["spectral_windows"][swin.window_name]["noise_a"]
-        noise_b = yml["spectral_windows"][swin.window_name]["noise_b"]
+        snr_a = yml["spectral_windows"][swin.window_name]["snr_a"]
+        snr_b = yml["spectral_windows"][swin.window_name]["snr_b"]
 
         # This is a simple SNR model, where noise is a normal distribution
         # sample with sigma = signal / SNR. You may want to replace this
         # by an actual noise model.
         signal = rt_buffer.radiance.I[rt_buffer.indices[swin]]
 
-        noise = @. sqrt(signal * noise_a + noise_b)
+        snr = @. sqrt(signal * snr_a + snr_b)
+        noise = signal ./ snr
         noise .*= randn(rng, Float64, (length(noise)))
 
         # Add noise to radiance

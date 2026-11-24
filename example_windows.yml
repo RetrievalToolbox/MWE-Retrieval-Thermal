@@ -2,12 +2,14 @@ spectral_windows:
 
   window1:
     wavelength_unit: nm
-    wavelength_min: 4470.0
-    wavelength_max: 4500.0
+    wavelength_min: 4450.0
+    wavelength_max: 4550.0
     wavelength_ref: 4500.0
     wavelength_buffer: 2.0
-    noise_a: 1e-10
-    noise_b: 1e-7
+    # Note: to set a constant SNR for all spectral points
+    # simply set `snr_a` to 0, and `snr_b` to (desired SNR)^2
+    snr_a: 2500.0
+    snr_b: 2500.0
 
 gases:
   - CO2
